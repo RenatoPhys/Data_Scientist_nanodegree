@@ -14,7 +14,7 @@ Para rodar o notebook é necessário ter o **Python 2.7** e as seguintes bibliot
 Evidentemente, também é necessário ter instalado o software Jupyter ([Jupyter Notebook](http://ipython.org/notebook.html)) para rodar o notebook.
 
 ### Dados
-As tabelas de dados 
+Neste folder também podemos encontrar as tabelas de dados:
 - turnstile_data_master_with_weather
 - mapper_result
 - reducer_result
