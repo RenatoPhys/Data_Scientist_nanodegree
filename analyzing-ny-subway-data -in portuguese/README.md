@@ -3,7 +3,7 @@
 
 ### Código
 
-O código principal para a análise dos dados é o `customer_segments.ipynb`, o qual pode ser encontrado [aqui]. Também é fornecido um template em HTML que pode ser encontrado [aqui].
+O código principal para a análise dos dados é o `analyzing-subway-data_critelli.ipynb`, o qual pode ser encontrado [aqui]. Também é fornecido um template em HTML que pode ser encontrado [aqui].
 
 Para rodar o notebook é necessário ter o **Python 2.7** e as seguintes bibliotecas instaladas:
 
@@ -22,4 +22,4 @@ As tabelas de dados
 As demais tabelas, i.e. *turnstile_170603*, *turnstile_170610*, *turnstile_170617*, e *junho_2024*, não estão aqui neste folder pois o tamanho delas é demasiado grande. Contudo, tais tabelas são facilmente geradas no notebook principal.
 
 ### Referências
-As referências externas usadas para completar o projeto estão indicadas no notebook Jupyter no campo em que a referência foi utilizada.
+As referências externas usadas para completar o projeto estão indicadas no notebook Jupyter `analyzing-subway-data_critelli.ipynb` no campo em que a referência foi utilizada.
