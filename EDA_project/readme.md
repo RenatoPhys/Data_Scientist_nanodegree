@@ -1,6 +1,6 @@
 ## Análise de Dados com R
 
-Esta pasta contém o projeto de Análise Exploratória dos Dados (AED) feito sobre a Taxa Anual de Hectare (TAH) utilizando o banco de dados do governo brasileiro.
+Esta pasta contém o projeto de Análise Exploratória dos Dados (AED) feito sobre a Taxa Anual por Hectare (TAH) utilizando o banco de dados do governo brasileiro.
 
 Em resumo, esta pasta contém os seguintes arquivos:
 - Arquivo "EDA_project_TAH.rmd" contendo o script em R utilizado para a análise dos dados.
