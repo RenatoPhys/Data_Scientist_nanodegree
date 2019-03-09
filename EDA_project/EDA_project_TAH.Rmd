@@ -1,0 +1,438 @@
+---
+title: "Um estudo sobre a Taxa Anual por Hectare"
+author: "Renato Critelli"
+date: "5 de março de 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Carregue aqui todos os pacotes utilizados 
+# na sua análise realizada neste arquivo fonte.
+
+# Note que o parÃ¢metro "echo" foi definido como FALSE neste código.
+# Isso previne que o código apresente resultados formatados em HTML.
+# Você deve definir echo=FALSE para todos os blocos de código no seu arquivo.
+
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(magrittr)
+library(XML)
+library(RCurl)
+library(maptools)
+library(RColorBrewer)
+library(sf)
+```
+
+
+```{r echo=FALSE}
+# Carregamento dos dados
+tah <- read.csv("Tah.csv", header=TRUE, sep=",")
+```
+
+```{r echo=FALSE}
+# Substituindo a separação decimal de vírgula para ponto
+tah$Hectares <- sub(",",".",tah$Hectares)
+tah$Hectares <- suppressWarnings(as.numeric(tah$Hectares))
+tah$Valor.Total.Cobrado <- sub(",",".",tah$Valor.Total.Cobrado)
+tah$Valor.Total.Cobrado <- suppressWarnings(as.numeric(tah$Valor.Total.Cobrado))
+tah$Valor.Pago <- sub(",",".",tah$Valor.Pago)
+tah$Valor.Pago <- suppressWarnings(as.numeric(tah$Valor.Pago))
+
+# Removendo linhas com NaN
+tah <- na.omit(tah)
+
+#Colocando o ano do processo como variável numérica
+tah$Ano.do.Processo <- as.numeric(as.character(tah$Ano.do.Processo))
+```
+
+## Introdução
+
+Neste projeto faremos uma análise exploratória dos dados (AED) referentes ao setor de minérios do Brasil. Mais especificamente, iremos explorar os dados referentes à Taxa Anual por Hectare (TAH), que nada mais é que um imposto pago anualmente por empresas que desejam extrair minérios do solo brasileiro. O banco de dados utilizado é disponibilizado livremente peo governo brasileiro por meio do link [aqui](http://dados.gov.br/dataset/taxa-anual-por-hectare-tah/resource/9b1eb3ea-22b5-47d6-ad55-d1c8b20dfdc2?inner_span=True). 
+
+Para saber mais detalhes sobre a TAH, recomendo a leitura deste [link](https://www.igneabr.com/single-post/2017/12/18/Taxa-Anual-por-Hectare---TAH-Jan2018).
+
+
+## Sessão de Gráficos Bivariados
+
+### Sumário:
+```{r echo=FALSE}
+summary(tah)
+```
+
+O banco de dados que iremos trabalhar contém cerca de 73 mil observações (processos) contendo 9 atributos (Processo, Ano.Processo, CNPJ, Pessoa.Física.Jurídica, Fase.do.Processo, Superintendência, Hectares, Valor.Pago, Valor.Cobrado). Conforme discutido no código fonte, o arquivo original possuir cerca de 110 mil observações, entretanto, como algumas linhas estão mal formatadas, cerca de 40 mil linhas foram descartadas no processo de limpeza dos dados.
+
+<br>
+**Vamos agora à exploração dos dados!**
+
+
+Como primeiro plot para compor a exploração dos dados, vamos analisar por meio de um histograma a distribuição de processos pelo ano em que ele foi feito. Iremos considerar os dados a partir do ano de 1980, pois anos anteriores possuem poucos processos.
+```{r echo=FALSE}
+ggplot(tah[tah$Ano.do.Processo >1980,], aes(Ano.do.Processo, fill = Ano.do.Processo)) + geom_bar() +
+  ggtitle("Distribuição dos Processos por Ano") +
+  scale_x_continuous(breaks=seq(1900,2020,by=3)) +  guides(fill=FALSE)
+```
+
+Acima, notamos facilmente que o número de processos vem crescendo desde o ano de 1980, atingindo um pico por volta do ano de 2008. Depois do ano de 2012 podemos ver uma queda mais acentuada do número de processos, que muito provavelmente se deve à crise enfrentanda pelo Brasil nos últimos anos.
+
+Como próxima próxima análise, vamos ver a distribuição dos Hectares
+```{r echo=FALSE}
+ggplot(tah, aes(Hectares, fill = Hectares)) + geom_histogram(binwidth=150) +
+  ggtitle("Distribuição dos Hectares") 
+```
+
+
+Uma vez que a distribuição dos Hectares é consideravelmente assimétrica à direita (*skewed*), vamos considerar uma transformação logaritmica nas escalas para inspecionar melhor a distribuição dos Hectares.
+```{r echo=FALSE}
+plot1 <- ggplot(tah, aes(Hectares)) + geom_histogram(binwidth=0.05) + scale_x_log10() +
+  ggtitle("Distribuição dos Hectares em escala logarítmica") +
+  coord_cartesian(xlim = (c(0.5, 10000)))
+
+plot1
+```
+
+Agora sim, podemos ver mais claramente algumas caracteristicas importantes. Por exemplo, é interessante notar do plot acima que, de certa forma, a distribuição dos Hectares parece ser composta por quatro distribuições assimétricas à esquerda, com acúmulos por volta de 75, 1000, 3000, e 10000 hectares.
+
+
+No próximo gráfico vamos ver a distribuição das empresas no pagamento da TAH. Entretanto, como temos um número enorme de empresas listadas, colocaremos as contribuições das 15 empresas com maior número de processos. As demais empresas serão categorizadas como "other" (outras).
+
+```{r echo=FALSE}
+n= 15 # Número de empresas que vamos considerar
+empresas <- as.data.frame(sort(table(tah$Pessoa.Física.Jurídica),decreasing=TRUE)[1:n])
+colnames(empresas) <- c("empresa", "freq")
+v <- empresas$empresa
+levels(tah$Pessoa.Física.Jurídica) <- c(levels(tah$Pessoa.Física.Jurídica), "other")
+tah$Pessoa.Física.Jurídica[!(is.element(tah$Pessoa.Física.Jurídica, v))] <- 'other'
+
+#Uma vez feito o filtro, vamos plotar a participação das empresas
+ggplot(tah[is.element(tah$Pessoa.Física.Jurídica, v), ], aes(x=Pessoa.Física.Jurídica)) + geom_bar() +
+  ggtitle("Distribuição das Principais Empresas") + coord_flip()
+```
+
+Como poderia ser previsto por um leigo, a empresa Vale S. A. detém o maior número de processos, seguida pela empresa Votorantim Cimentos e Nexa Recursos Minerais. 
+
+Seguindo adiante, faremos um histograma para inspecionar a distribuição das fases do projeto de mineração no pagamento da TAH.
+```{r echo=FALSE}
+ggplot(tah, aes(Fase.do.Processo)) + geom_bar() +
+  ggtitle("Distribuição das Fases do Processo") + coord_flip()
+```
+
+Notamos facilmente a hegemonia da fase de "Autorização de Pesquisa" na distribuição dos processos.
+
+Outro atributo interessante apresentado pelo banco de dados dos processos da TAH é a tal da Superintendência, isto é, qual a participação de cada estado brasileiro na distribuição dos processos.
+```{r echo=FALSE}
+ggplot(tah, aes(Superintendência)) + geom_bar() +
+  ggtitle("Distribuição dos Processos por Estado") + coord_flip()
+```
+
+Em termos de **volume**, o estado de SC tem a maior participação. Porém, na seção de gráficos bivariados, veremos que o **valor** arrecadado por estados tem uma distribuição diferente.
+
+Um atributo quantitativo interessante do banco de dados é o referente ao valor cobrado do imposto. Como os valores cobrados têm uma grande dispersão (*overdispersion*), nós plotaremos direto o histograma usando a escala logaritmica.
+```{r echo=FALSE}
+ggplot(tah, aes(Valor.Total.Cobrado)) + geom_histogram(binwidth = 0.05) +
+  ggtitle("Distribuição dos Valores Cobrados") + scale_x_log10()
+```
+
+Como último plot desta seção, faremos o histograma do valor pago pelas empresas relativo à TAH. Como os valores pagos também têm uma grande dispersão, nós plotaremos direto o histograma usando a escala logaritmica.
+```{r echo=FALSE}
+ggplot(tah, aes(Valor.Pago)) + geom_histogram(binwidth = 0.05) +
+  ggtitle("Distribuição dos Valores Cobrados") + scale_x_log10()
+```
+
+O *warning* indica a presença de valores zero. Ou seja, alguns processos foram cobrados mas não foram pagos.
+
+## Análise Univariada
+
+### Qual é a estrutura do conjunto de dados?
+
+No conjunto de dados original há cerca de 110 mil observações (processos) contendo 9 atributos, dos quais 5 são quantitativos ("Processo", "Ano.do.Processo", "Valor.Total.Cobrado", "Valor.Pago", "Hectares"), e 4 são qualitativos ("CPF.CNPJ", "Pessoa.Física.Jurídica ", "Fase.Processo", "Superintendência"). Entretanto, no banco de dados original algumas linhas estão mal formatadas, resultando em alguns valores "NaN". Após a eliminação destes valores espúrios, ficamos com cerca de 73 mil processos.
+
+### Quais são os principais atributos de interesse deste conjunto de dados?
+Intiutivamente eu diria que os principais atributos são Hectares, Valores cobrados e valores pagos. O número de Hectares deve estar bem correlacionada com os valores cobrados e pagos. 
+
+### Quais outros atributos você acha que podem lhe auxiliar na investigação destes atributos de interesse?
+
+Seria interessante ver como se comportam esses atributos com relação ao ano e empresa. Ademais, também irei utilizar abaixo o atributo "Superintendência" (i.e. o estado) para criar um mapa da arrecadação do TAH. 
+
+### Você criou novas variáveis a partir dos atributos existentes no conjunto de dados?
+Não.
+
+### Dos atributos investigados, distribuições incomuns foram encontradas? Você aplicou operações nos dados para limpá-los, ajustá-los ou mudar a forma dos dados? Se sim, por quê?
+
+Foram encontradas distribuições altamente enviesadas para a direita nos atributos quantitativos ("Ano.do.Processo", "Valor.Total.Cobrado", "Valor.Pago", "Hectares"), o que me fez fazer um plot na escala logarítmica para cada um deles.
+
+Também fiz algumas operações para limpar os dados de valores do tipo "NaN".
+
+
+
+
+## Sessão de Gráficos Bivariados
+
+O primeiro plot da sessão bivariada é um gráfico do tipo histograma bidimensional relacionando os hectares e valores pagos e cobrados.
+```{r echo=FALSE}
+p1 <- ggplot(tah, aes(x=log10(Hectares), y=log10(Valor.Pago))) +  geom_bin2d(bins = 60)  +
+  ggtitle("Hectares x Valor Pago") + theme(legend.position="bottom")
+p2 <- ggplot(tah, aes(x=log10(Hectares), y=log10(Valor.Total.Cobrado))) +  geom_bin2d(bins = 60)  +
+  ggtitle("Hectares x Valor Cobrado")+ theme(legend.position="bottom")
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+Notamos claramente uma tendência linear nos plots acima, sugerindo uma lei de potências entre o valor pago(cobrado) e o número de hectares da propriedade. Essa tendência ficará mais transparente quando fizermos a análise multivariada. Adicionalmente, podemos ver linhas de acúmulo ao longo alguns valores de hectares já mencionados na seção univariada. É interessante verificar também a presença de valores atípicos quando o número de hectares é mais elevado.
+
+Apesar de os últimos plots indicarem uma grande semelhança entre os valores cobrados e pagos da TAH, para fazer uma comparação mais precisa entre tais valores, vamos plotar um gráfico de densidades, similar ao histograma.
+```{r echo=FALSE}
+Pago <- tah[["Valor.Pago"]]
+Cobrado <- tah[["Valor.Total.Cobrado"]]
+
+dif_pag_cob <- data.frame(Cobrado, Pago)  %>% 
+  gather(key, value, Cobrado:Pago)
+
+ggplot(data = dif_pag_cob) +
+  geom_density(aes(value * 100, fill = key, color = key), alpha = 0.2) +
+  scale_fill_manual(values = c('green', "red")) + 
+  scale_color_manual(values = c('black', 'black')) +
+  scale_y_continuous(name = "Densidade")+
+  scale_x_log10(name = "Valores Pagos e Cobrados") +
+  ggtitle('Densidade de Valores Pagos e Cobrados') +
+  theme(legend.title = element_blank())
+```
+
+Notamos então que, de fato, há uma discrepância mínima entre os valores cobrados e pagos. Portanto, daqui em diante poderemos assumir que valor pago é mais ou menos igual ao valor cobrado.
+
+Em nosso próximo gráfico bivariado referente à TAH, vamos analisar a quantidade de valores pagos para as principais empresas mineradoras que pagaram a taxa. Para tal tarefa, utilizaremos box plots.
+```{r echo=FALSE, fig.height=8}
+ggplot(tah[is.element(tah$Pessoa.Física.Jurídica, v), ], aes(Pessoa.Física.Jurídica, Valor.Pago)) + geom_boxplot() + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Analogamente, vamos repetir o plot acima, trocando o valor pago pelo valor cobrado.
+```{r echo=FALSE, fig.height=8}
+ggplot(tah[is.element(tah$Pessoa.Física.Jurídica, v), ], aes(Pessoa.Física.Jurídica, Valor.Total.Cobrado)) + geom_boxplot() + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+
+Como esperado, o resultado é semelhante ao box-plot dos valores pagos.
+
+Como próximo passo, vamos confeccionar um plot do tipo box plot comparando o número de hectares dos processos das maiores companhias mineradoras.
+```{r echo=FALSE, fig.height=8}
+ggplot(tah[is.element(tah$Pessoa.Física.Jurídica, v), ], aes(Pessoa.Física.Jurídica, Hectares)) + geom_boxplot() + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Interessante notar que a maior companhia, i.e. a Vale, possuiu uma grande variedade de tamanhos, desde poucos hectares, até os milhares.
+
+
+Estando já perto do fim da seção de gráficos bivariados, vamos fazer um histograma em duas dimensões relacionando os valores pagos com o ano do pagamento da TAH.
+```{r echo = FALSE}
+ggplot(tah[tah$Ano.do.Processo >1980,], aes(x=Ano.do.Processo, y=log10(Valor.Pago))) +  geom_bin2d(bins = 50)  +
+  ggtitle("Ano x Valor Pago") + 
+  scale_x_continuous(breaks=seq(1900,2020,by=3))
+```
+
+Seguindo o espírito do primeiro gráfico deste trabalho, vemos um grande número de processos sendo pagos por volda de 2008, com um subsequente esmorecimento nos últimos anos, fruto da crise econnômica brasileira.
+
+Como último plot desta seção, vamos calcular o valor acumulado pago por cada estado (superintendência) referente à TAH. Uma vez feito isso, temos o seguinte resultado abaixo:
+```{r echo=FALSE}
+# O scrit para a confecção do mapa é baseado no algoritmo apresentado em:
+# https://sociaisemetodos.wordpress.com/2013/09/15/mapas-no-r-parte-2-utilizando-shapes/
+
+# Fazendo a soma agregada dos estados brasileiros
+tst <- aggregate(tah$Valor.Pago, by=list(UF=tah$Superintendência), FUN=sum)
+
+# Retirando a string "Gerencia Regional - " da coluna UF
+tst$UF <- gsub("Gerência Regional - ", "", tst$UF)
+
+# Adicionando os estados que não contribuiram
+tst[nrow(tst) + 1,] = list("DF", 0.01)
+tst[nrow(tst) + 1,] = list("RN", 0.01)
+tst[nrow(tst) + 1,] = list("MS", 0.01)
+tst[nrow(tst) + 1,] = list("PE", 0.01)
+tst[nrow(tst) + 1,] = list("PB", 0.01)
+tst[nrow(tst) + 1,] = list("AL", 0.01)
+tst[nrow(tst) + 1,] = list("TO", 0.01)
+tst[nrow(tst) + 1,] = list("AC", 0.01)
+tst[nrow(tst) + 1,] = list("AP", 0.01)
+
+# Divide o valor do valor pago por 1.000.000, para que seja expresso em bilhões de reais
+tst$x <- tst$x/10^6
+
+# Transforma os dados do PIB em uma variável categórica.
+tst$pago_cat = cut(tst$x, breaks=c(0,5,20,40,60,100, 1000),
+                          labels=c('até 5','+ 5', '+ 20', '+ 40', '+ 60', '+ 100'))
+
+# Selecionamos algumas cores de uma paleta de cores do pacote RColorBrewer
+paletaDeCores <- brewer.pal(9, 'OrRd')
+paletaDeCores <- paletaDeCores[-c(3,6,8)]
+
+# Agora fazemos um pareamento entre as faixas da variável sobre o valor pago (categórica) e as cores:
+coresDasCategorias = data.frame(pago_cat=levels(tst$pago_cat), Cores=paletaDeCores)
+tst <- merge(tst, coresDasCategorias)
+
+# Primeiramente, guardamos os dados do .dbf num objeto do R.
+# Ele é um atributo do objeto mapaUF
+mapaUF <- readShapePoly("Brasil.shp")
+mapaData <- attr(mapaUF, 'data')
+
+# Guardamos o número das linhas numa nova variável
+# Esse passo é necessário pois o pareamento entre esses dados e a tabela do PIB
+# muda a ordem os casos, o que prejudica, depois, a construção do mapa
+mapaData$Index = row.names(mapaData)
+
+# Mudando o nome da variável que indica a sigla dos estados
+#names(mapaData)[3] = "UF"
+
+# Fundimos então as duas tabelas:
+mapaData <- merge(mapaData, tst, by="UF")
+
+# Reordenamos os dados do mapa
+mapaData = mapaData[order(as.numeric(mapaData$Index)),]
+
+# E guardamos essas informações novamente como sendo um atributo do arquivo de mapa.
+attr(mapaUF, 'data') <- mapaData
+
+# Configurando tela (reduzindo as margens da figura)
+parDefault = par(no.readonly = T)
+layout(matrix(c(1,2),nrow=2),widths= c(1,1), heights=c(4,1))
+par (mar=c(0,0,0,0))
+
+# Plotando mapa
+plot(mapaUF, col=as.character(mapaData$Cores))
+plot(1,1,pch=NA, axes=F) 
+legend(x='center', legend=rev(levels(mapaData$pago_cat)),
+       box.lty=0, fill=rev(paletaDeCores),cex=.8, ncol=2,
+       title='Mapa do pagamento acumulado da TAH. Em bilhões de reais:')
+```
+
+Conforme antecipado na seção anterior, apesar do estado de Santa Catarina ter o maior volume de processos ele não é o que arrecada mais. De fato, vemos acima que o estado do Espírito Santo é o que mais arrecadou durante a vigência da TAH. Outro fato interessante é que três estados do Nordeste (Bahia, Piauí e Ceará) arrecadaram mais de 40 bilhões de reais referentes à TAH.
+
+# Análise Bivariada
+
+### Discuta sobre alguns dos relacionamentos observados nesta parte da investigação. Como os atributos de interesse variaram no conjunto de dados?
+
+Dado os atributos de interesse (valor pago, valor cobrado, e hectares), a seção de gráficos bivariados foi muito interessante para descobrir alguns padrões. Primeiramente, descobrimos que o valor pago e o valor cobrado são praticamente iguais, o que indica que o tributo (TAH) foi pago em sua quase totalidade.
+
+Em segundo lugar, notamos um comportamento linear comparando o logarítmo do valor pago (cobrado) com o logarítmo do número de hectares, o que indica que o imposto da TAH é cobrado utilizando alguma lei de potências em função dos hectares da propriedade. Isso ficará mais claro na seção seguinte.
+
+### Você observou algum relacionamento interessante entre os outros atributos (os que não são de interesse)?
+
+Utilizando os dados dos processos segmentados por estados brasileiros, foi possível fazer um mapa que mostra a distribuição do valor total acumulado pago em cada estado relativo à TAH.
+
+### Qual foi o relacionamento mais forte encontrado?
+
+Pode-se dizer, com relativa tranquilidade, que o relacionamento mais forte encontrado foi entre o valor pago (ou cobrado) e o número de hectares.
+
+
+
+# Sessão de Gráficos Multivariados
+
+Nesta seção de gráficos multivariados iremos ver como os insights surgem uma vez que mais de dois atributos são utilizados para confeccionar as imagens de visualização dos dados.
+
+Vamos iniciar a análise multivariada plotando o valor pago por hectare estratificado pelas maiores empresas.
+```{r echo = FALSE, fig.height=8}
+ggplot(tah[is.element(tah$Pessoa.Física.Jurídica, v), ], aes(x=log10(Hectares), y=log10(Valor.Pago), fill=Pessoa.Física.Jurídica)) + 
+  geom_point(aes(color=Pessoa.Física.Jurídica), alpha = 0.5, size = 1.5)  +
+  ggtitle("Valor Pago x Hectares") +
+    theme(legend.position="bottom")  +
+   guides(color = guide_legend(override.aes = list(alpha = 1, size = 5), ncol = 2))
+```
+
+Pelo gráfico acima, podemos ver que os maiores valores de hectares e valores pagos têm predominância da empresa Vale. Podemos ver outros pontos interessantes, por exemplo, a empresa "Aro Mineração Ltda" (bolinha laranja na legenda) tem uma dominância quando o número de hectares é baixo.
+
+De forma análoga, vamos repetir o plot acima, mas agora vamos estratificar o scatter plot por estados brasileiros.
+```{r echo = FALSE, fig.height=8}
+ggplot(tah, aes(x=log10(Hectares), y=log10(Valor.Pago))) + 
+  geom_point(aes(color = factor(Superintendência)), alpha = 0.2, size = 0.8)  +
+  ggtitle("Valor Pago x Hectares") +
+    theme(legend.position="bottom") +
+   guides(color = guide_legend(override.aes = list(alpha = 1, size = 5), ncol=3, title = 'Estados')) + xlim(-0.5,4)
+```
+
+É interessante notar acima que os maiores hectares e, por consequência, os maiores valores pagos, têm forte presença do estado do RJ, com uma participação no topo do estados da Bahia e Ceará. A presença do estado do ES (maior arrecadador da TAH) está mais concentrada no meio do gráfico.
+
+Indo para os estágios finais, vamos ver repetir o gráfico acima mas agora estratificando anualmente o pagamento da taxa por hectares.
+```{r echo = FALSE, fig.height=8}
+plot3 <- ggplot(tah[tah$Ano.do.Processo >1980,], aes(x=log10(Hectares), y=log10(Valor.Pago))) + 
+  geom_point(aes(color = factor(Ano.do.Processo)), alpha = 0.2, size = 0.8)  +
+  ggtitle("Valor Pago x Hectares") +
+    theme(legend.position="bottom") +
+   guides(color = guide_legend(override.aes = list(alpha = 1, size = 5), ncol=9, title = 'Ano')) + xlim(-0.5,4)
+
+plot3 
+```
+
+E *voilá*! O gráfico acima mostra claramente a tendência linear da TAH quando estratificamos anualmente. Isto é, para cada ano temos uma reta que descreve o log do valor TAH com o log do número de hectares. Naturalmente, com o passar dos anos o intercepto da reta é deslocado para cima (aumeto da TAH), mas o coeficiente linear parece se manter constante.
+
+# Análise Multivariada
+
+### Discuta sobre os relacionamentos observados nesta parte da investigação. Quais atributos que fortaleceram os demais na observaçõeso das variáveis de interesse?
+
+Em nossas investigações acerca do valor arrecadado e o número de hectares do terreno explorado, foi aventada a hipótese, na sessão de gráficos bivariados, de que o logaritmo dessas duas variáveis tivesse um comportamento linear. Ao estratificarmos essa visualização em termos das demais variáveis, obtivemos uma confirmação (visual) de que de fato, há um comportamento linear entre essas duas variáveis.
+
+Ademais, pudemos observar como fica a distribuição das maiores empresas quando plotamos o valor pago pelo número de hectares. 
+
+### Interações surpreendentes e/ou interessantes foram encontradas entre os atributos?
+
+Em nosso último plot, em especial, tivemos um grande insight. Ao plotarmos o log do valor pago em função do log do número de hectares, estratificado pelo ano de pagamento, conseguimos ver que cada ano corresponde a uma reta. Com o passar dos anos, por conta do ajuste da TAH, o intercepto da reta aumenta gradativamente.
+
+```{r echo=FALSE}
+### OPCIONAL: Modelos foram criados usando este conjunto de dados? Discuta sobre os pontos fortes e as limitações do seu modelo.
+```
+
+------
+
+# Gráficos Finais e Sumário
+
+### Primeiro Gráfico
+```{r echo=FALSE, Plot_One}
+plot1
+```
+
+### Descrição do Primeiro Gráfico
+
+A distribuição de hectares referentes à TAH, em escala logaritmica, parece ser composta por quatro distribuições assimétricas à esquerda, com acúmulos por volta de 75, 1000, 3000, e 10000 hectares.
+
+### Segundo Gráfico
+```{r echo=FALSE, Plot_Two}
+# Configurando tela (reduzindo as margens da figura)
+parDefault = par(no.readonly = T)
+layout(matrix(c(1,2),nrow=2),widths= c(1,1), heights=c(4,1))
+par (mar=c(0,0,0,0))
+
+plot(mapaUF, col=as.character(mapaData$Cores))
+plot(1,1,pch=NA, axes=F) 
+legend(x='center', legend=rev(levels(mapaData$pago_cat)),
+       box.lty=0, fill=rev(paletaDeCores),cex=.8, ncol=2,
+       title='Mapa do pagamento acumulado da TAH. Em bilhões de reais:')
+```
+
+### Descrição do Segundo Gráfico
+
+A maior parte da arrecadação da TAH está concentrada em nove estados da federação, i.e. Santa Catarina, Amazonas, Paraná, Espírito Santo, Bahia, Piauí, Ceará, Rondônia, e Amazonas. O destaque vai apra o Espírito Santo com uma grande arrecadação de TAH.
+
+### Terceiro Gráfico
+```{r echo=FALSE, Plot_Three, fig.height=8}
+plot3
+```
+
+### Descrição do Terceiro Gráfico
+
+O gráfico mostra a tendência linear da TAH quando estratificamos anualmente. Isto é, para cada ano temos uma reta que descreve o log do valor TAH com o log do número de hectares. Naturalmente, com o passar dos anos o intercepto da reta é deslocado para cima (aumeto da TAH), mas o coeficiente linear parece se manter constante.
+
+------
+
+# Reflexão
+
+Utilizando o banco de dados do governo brasileiro referente ao pagamento da TAH, exploramos e analisamos graficamente os cerca de 73 mil processos.
+
+Na seção da análise univariada, seção essa dedicada à exploração inicial dos dados, já foi possível extrair informações interessantes e relevantes da TAH. Por exemplo, descobrimos um pico de processos feitos por volta do ano de 2008, seguido de uma queda relativamente abrupta oriunda da crise brasileira. Além disso, foi possível ver como é a distribuição dos hectares (vide o "Primeiro Gráfico" logo acima) dos terrenos usados para a exploração mineral do solo brasileiro.
+
+Já na seção de análise bivariada, começamos a ver alguns detalhes mais importantes que não tínhamos visto. Em especial, foi feito um mapa do Brasil que permitiu uma comparação detalhada do arrecadamento da TAH por estado brasileiro. Ademais, nessa seção bivariada também foi possível ver que o valor pago e o valor cobrado foi praticamente o mesmo tirando alguns inadimplentes. 
+
+Na última parte deste trabalho, o qual cobre a análise multivariada, foi possível corroborar hipóteses levantadas anteriormente de forma mais precisa, como o fato de que há ume relação linear que descreve o log do valor TAH com o log do número de hectares, conforme mostrado no "Terceiro Gráfico". Evidentemente, deve ser possível encontrar alguma fórmula para o cálculo da TAH em arquivos jurídicos, mas em minhas buscas online, não consegui encontrar algo simples e direto de cálculo. De qualquer forma,com esta exploração de dados, conseguimos conhecer um pouco mais de uma estrutura tributária do Brasil.
